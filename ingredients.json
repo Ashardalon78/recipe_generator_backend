@@ -1,0 +1,6 @@
+{
+	"vegetables": ["Spinach", "Carrots", "Broccoli", "Peppers"],
+    "proteins": ["Chicken", "Tofu", "Beef", "Beans"],
+    "carbs": ["Rice", "Pasta", "Quinoa", "Potatoes"],
+    "fats": ["Olive oil", "Butter", "Avocado", "Nuts"]
+}
