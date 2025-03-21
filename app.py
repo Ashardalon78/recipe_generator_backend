@@ -8,8 +8,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)  # Erlaubt Anfragen von deinem Vue-Frontend
 
-# DATA_FILE = "recipes.json"
-
+# Zutatenliste für zufällige Rezepte
 with open('ingredients.json', 'r') as ifile:
     ingredients = json.load(ifile)
 
@@ -26,38 +25,46 @@ if not os.path.exists(DB_DIR):
 print(DB_DIR)
 
 def init_db():
-    """Erstellt die Tabelle, falls sie nicht existiert."""
+    os.makedirs("data", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+
+    # Tabelle für Benutzer erstellen
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS recipes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            ingredients TEXT,
-            instructions TEXT
-        )
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL
+    )
     """)
+
+    # Tabelle für Rezepte anpassen (mit user_id als Fremdschlüssel)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS recipes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        ingredients TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+
     conn.commit()
     conn.close()
 
 # Datenbank beim Start initialisieren
 init_db()
 
-# # Rezepte aus Datei laden
-# def load_recipes():
-#     if not os.path.exists(DATA_FILE):
-#         return []
-#     with open(DATA_FILE, "r", encoding="utf-8") as file:
-#         return json.load(file)
-
-# # Rezepte speichern
-# def save_recipes(recipes):
-#     with open(DATA_FILE, "w", encoding="utf-8") as file:
-#         json.dump(recipes, file, indent=2)
+# Funktion zum Abrufen der DB-Verbindung
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # Ermöglicht den Zugriff auf Daten durch Spaltennamen
+    return conn
 
 # Endpoint: Zufälliges Rezept generieren
-@app.route("/generate", methods=["GET"])
-def generate_recipe():
+@app.route("/generate/<int:user_id>", methods=["GET"])
+def generate_recipe(user_id):
+    # Beispiel Rezeptgenerierung für den User
     recipe = {
         "title": "Neues Rezept",
         "ingredients": {
@@ -68,46 +75,94 @@ def generate_recipe():
         },
         "instructions": "Zubereitung..."
     }
+
+    # Optional: Hier könnte man überprüfen, ob der User existiert, bevor man das Rezept generiert.
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
     return jsonify(recipe)
 
-# Endpoint: Rezept speichern
+# Alle User abrufen
+@app.route("/users", methods=["GET"])
+def get_users():
+    conn = get_db_connection()
+    users = conn.execute("SELECT * FROM users").fetchall()
+    conn.close()
+    return jsonify([dict(user) for user in users])
+
+# Neuen User registrieren
+@app.route("/register", methods=["POST"])
+def register_user():
+    data = request.json
+    username = data.get("name")
+    
+    if not username:
+        return jsonify({"error": "Username required"}), 400
+
+    conn = get_db_connection()
+    try:
+        conn.execute("INSERT INTO users (name) VALUES (?)", (username,))
+        conn.commit()
+        user_id = conn.execute("SELECT id FROM users WHERE name = ?", (username,)).fetchone()[0]
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Username already exists"}), 409
+    finally:
+        conn.close()
+
+    return jsonify({"id": user_id, "name": username})
+
+# Alle Rezepte eines Users abrufen
+@app.route("/recipes/<int:user_id>", methods=["GET"])
+def get_recipes(user_id):
+    conn = get_db_connection()
+    recipes = conn.execute("SELECT * FROM recipes WHERE user_id = ?", (user_id,)).fetchall()
+    conn.close()
+
+    # Umwandeln jedes Rezept von sqlite3.Row in ein Dictionary
+    recipes_list = []
+    for recipe in recipes:
+        recipe_dict = dict(recipe)  # Konvertiert das sqlite3.Row in ein Dictionary
+        # Umwandeln des gespeicherten JSON-Strings zurück in ein Dictionary für ingredients
+        recipe_dict["ingredients"] = json.loads(recipe_dict["ingredients"])
+        recipes_list.append(recipe_dict)
+
+    return jsonify(recipes_list)
+
+# Rezept speichern
 @app.route("/save", methods=["POST"])
 def save_recipe():
     data = request.json
-    title = data.get("title", "Rezept")
-    ingredients = str(data.get("ingredients", {}))  # Dict als String speichern
-    instructions = data.get("instructions", "")
+    user_id = data.get("user_id")
+    title = data.get("title")
+    ingredients = data.get("ingredients")
+    instructions = data.get("instructions")
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO recipes (title, ingredients, instructions) VALUES (?, ?, ?)",
-                   (title, ingredients, instructions))
+    if not user_id or not title or not ingredients or not instructions:
+        return jsonify({"error": "Missing data"}), 400
+
+    # Konvertiere ingredients (Dictionary) in JSON-String
+    ingredients_json = json.dumps(ingredients)
+
+    conn = get_db_connection()
+    conn.execute("INSERT INTO recipes (user_id, title, ingredients, instructions) VALUES (?, ?, ?, ?)",
+                 (user_id, title, ingredients_json, instructions))
     conn.commit()
     conn.close()
 
-    return jsonify({"message": "Rezept gespeichert!"}), 201
+    return jsonify({"message": "Recipe saved!"})
 
-# Endpoint: Gespeicherte Rezepte laden
-@app.route("/load", methods=["GET"])
-def load_saved_recipes():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, ingredients, instructions FROM recipes")
-    recipes = [{"id": row[0], "title": row[1], "ingredients": eval(row[2]), "instructions": row[3]} for row in cursor.fetchall()]
-    conn.close()
-
-    return jsonify(recipes)
-
-# Endpoint: Rezept löschen
+# Rezept löschen
 @app.route("/delete/<int:recipe_id>", methods=["DELETE"])
 def delete_recipe(recipe_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
+    conn = get_db_connection()
+    conn.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
     conn.commit()
     conn.close()
-
-    return jsonify({"message": "Rezept gelöscht!"})
+    return jsonify({"message": "Recipe deleted!"})
 
 if __name__ == "__main__":
     app.run(debug=True)
