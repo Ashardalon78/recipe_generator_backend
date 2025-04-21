@@ -1,6 +1,6 @@
 {
-	"vegetables": ["Spinach", "Carrots", "Broccoli", "Peppers"],
-    "proteins": ["Chicken", "Tofu", "Beef", "Beans"],
-    "carbs": ["Rice", "Pasta", "Quinoa", "Potatoes"],
-    "fats": ["Olive oil", "Butter", "Avocado", "Nuts"]
+	"vegetables": ["Karotten", "Rote Bete", "Sellerie", "Pastinaken", "Rettich", "Radieschen", "Schwarzwurzel", "Weißkohl", "Rotkohl", "Blumenkohl", "Brokkoli", "Rosenkohl", "Grünkohl", "Chinakohl", "Wirsing", "Spitzkohl", "Pak Choi", "Kohlrabi", "Spinat", "Mangold", "Kopfsalat", "Ruccola", "Feldsalat", "Endiviensalat", "Chicoree", "Radicchio", "Zwiebeln", "Launch", "Knoblauch", "Schalotten", "Frühlingszwiebeln", "Bärlauch", "Champignons", "Austernpilze", "Pfifferlinge", "Steinpilze", "Tomaten", "Paprika", "Gurken", "Zucchini", "Auberginen", "Fenchel", "Spargel", "Sprossen"],
+    "proteins": ["Hähnchenfleisch", "Putenfleisch", "Rindfleisch", "Wild", "Lachs", "Thunfisch", "Forelle", "Garnelen", "Seelachs", "Quark", "Hüttenkäse", "Feta", "Mozzarella", "Parmesan", "Hühnereier", "Linsen", "Kichererbsen", "Kidneybohnen", "Schwrze Bohnen", "Weiße Bohnen", "Erbsen", "Tofu", "Tempeh", "Seitan", "Edamame"],
+    "carbs": ["Kernige Haferflocken", "Volkornbrot/Brötchen", "Naturreis", "Dinkel", "Bulgur/Couscous", "Hirse", "Quinoa", "Amaranth", "Buchweizen", "Grünkern", "Kartoffeln", "Süßkartoffeln", "Kürbis", "Vollkornnudeln", "Linsennudeln", "Kichererbsennudeln", "Erbsennudeln"],
+    "fats": ["Olivenöl", "Rapsöl", "Leinöl", "Walnussöl", "Kokosöl", "Mandeln", "Walnüsse", "Haselnüsse", "Cashewkerne", "Macadamianüsse", "Kürbiskerne", "Sonnenblumenkerne", "Chiasamen", "Leinsamen", "Sesam", "Lachs", "Makrele", "Hering", "Sardinen", "Forelle", "Avocados", "Nussbutter", "Oliven", "Dunkle Schokolade"]
 }
