@@ -61,6 +61,11 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row  # Ermöglicht den Zugriff auf Daten durch Spaltennamen
     return conn
 
+# Alle Zutaten abholen
+@app.route("/ingredients", methods=["GET"])
+def get_ingredients():
+    return jsonify(ingredients)
+
 # Endpoint: Zufälliges Rezept generieren
 @app.route("/generate/<int:user_id>", methods=["GET"])
 def generate_recipe(user_id):
