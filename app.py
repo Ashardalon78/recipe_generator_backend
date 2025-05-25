@@ -99,6 +99,16 @@ def get_users():
     conn.close()
     return jsonify([dict(user) for user in users])
 
+#Einzelnen User abrufen
+@app.route("/users/<int:user_id>", methods=["GET"])
+def get_user(user_id):
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(dict(user))
+
 # Neuen User registrieren
 @app.route("/register", methods=["POST"])
 def register_user():
@@ -137,6 +147,25 @@ def get_recipes(user_id):
 
     return jsonify(recipes_list)
 
+#Einzelnes Rezept eines Users abrufen
+@app.route("/recipes/<int:user_id>/<int:recipe_id>", methods=["GET"])
+def get_recipe(user_id, recipe_id):
+    conn = get_db_connection()
+    recipe = conn.execute("SELECT * FROM recipes WHERE id = ? AND user_id = ?", (recipe_id, user_id)).fetchone()
+    conn.close()
+
+    if recipe is None:
+        return jsonify({"error": "Recipe not found"}), 404
+
+    # Wandelt die Row in ein Dictionary um
+    recipe_dict = dict(recipe)
+
+    # ⚠️ ingredients als JSON-Dict laden!
+    if isinstance(recipe_dict.get("ingredients"), str):
+        recipe_dict["ingredients"] = json.loads(recipe_dict["ingredients"])
+
+    return jsonify(recipe_dict)
+
 # Rezept speichern
 @app.route("/save", methods=["POST"])
 def save_recipe():
@@ -149,16 +178,25 @@ def save_recipe():
     if not user_id or not title or not ingredients or not instructions:
         return jsonify({"error": "Missing data"}), 400
 
-    # Konvertiere ingredients (Dictionary) in JSON-String
     ingredients_json = json.dumps(ingredients)
 
     conn = get_db_connection()
-    conn.execute("INSERT INTO recipes (user_id, title, ingredients, instructions) VALUES (?, ?, ?, ?)",
-                 (user_id, title, ingredients_json, instructions))
+    cursor = conn.execute(
+        "INSERT INTO recipes (user_id, title, ingredients, instructions) VALUES (?, ?, ?, ?)",
+        (user_id, title, ingredients_json, instructions)
+    )
     conn.commit()
+    recipe_id = cursor.lastrowid
     conn.close()
 
-    return jsonify({"message": "Recipe saved!"})
+    # Sende das neue Rezept zurück, damit das Frontend die ID kennt
+    return jsonify({
+        "id": recipe_id,
+        "user_id": user_id,
+        "title": title,
+        "ingredients": ingredients,
+        "instructions": instructions
+    })
 
 # Rezept löschen
 @app.route("/delete/<int:recipe_id>", methods=["DELETE"])
