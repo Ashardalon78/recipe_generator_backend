@@ -166,6 +166,33 @@ def get_recipe(user_id, recipe_id):
 
     return jsonify(recipe_dict)
 
+#Rezepte gefiltert nach Zutaten abrufen
+@app.route("/filters/<int:user_id>", methods=["GET"])
+def get_filter_options(user_id):
+    conn = get_db_connection()
+    recipes = conn.execute(
+        "SELECT ingredients FROM recipes WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    conn.close()
+
+    categories = {
+        "vegetables": set(),
+        "proteins": set(),
+        "carbs": set(),
+        "fats": set()
+    }
+
+    for row in recipes:
+        ingredients = json.loads(row["ingredients"])
+        for cat in categories:
+            value = ingredients.get(cat)
+            if value:
+                categories[cat].add(value)
+
+    #Alphabetisch sortieren
+    result = {k: sorted(list(v)) for k, v in categories.items()}
+    return jsonify(result)
+
 # Rezept speichern
 @app.route("/save", methods=["POST"])
 def save_recipe():
