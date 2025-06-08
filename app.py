@@ -1,4 +1,5 @@
-import sqlite3
+import psycopg2
+from psycopg2 import IntegrityError
 import json
 import os
 import random
@@ -12,54 +13,15 @@ CORS(app)  # Erlaubt Anfragen von deinem Vue-Frontend
 with open('ingredients.json', 'r') as ifile:
     ingredients = json.load(ifile)
 
-# Speicherort innerhalb des Projektordners
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Holt den Ordner von app.py
-DB_DIR = os.path.join(BASE_DIR, "data")  # /data liegt jetzt im Projektordner
-DB_PATH = os.path.join(DB_DIR, "recipes.db")  # Finaler Pfad zur SQLite-Datei
-
-# Stelle sicher, dass das Verzeichnis existiert
-if not os.path.exists(DB_DIR):
-    os.makedirs(DB_DIR, exist_ok=True)
-    print(f"Verzeichnis {DB_DIR} wurde erstellt!")
-
-print(DB_DIR)
-
-def init_db():
-    os.makedirs("data", exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Tabelle für Benutzer erstellen
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL
-    )
-    """)
-
-    # Tabelle für Rezepte anpassen (mit user_id als Fremdschlüssel)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS recipes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        ingredients TEXT NOT NULL,
-        instructions TEXT NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-# Datenbank beim Start initialisieren
-init_db()
-
 # Funktion zum Abrufen der DB-Verbindung
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # Ermöglicht den Zugriff auf Daten durch Spaltennamen
-    return conn
+    return psycopg2.connect(
+        host="db.fahadbyewpapvgjpghmh.supabase.co",
+        dbname="postgres",
+        user="postgres",
+        password="lZIzIXcPVCPTiZDH",
+        port=5432
+    )
 
 # Alle Zutaten abholen
 @app.route("/ingredients", methods=["GET"])
@@ -69,7 +31,6 @@ def get_ingredients():
 # Endpoint: Zufälliges Rezept generieren
 @app.route("/generate/<int:user_id>", methods=["GET"])
 def generate_recipe(user_id):
-    # Beispiel Rezeptgenerierung für den User
     recipe = {
         "title": "Neues Rezept",
         "ingredients": {
@@ -81,9 +42,11 @@ def generate_recipe(user_id):
         "instructions": "Zubereitung..."
     }
 
-    # Optional: Hier könnte man überprüfen, ob der User existiert, bevor man das Rezept generiert.
     conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    user = cur.fetchone()
+    cur.close()
     conn.close()
 
     if user is None:
@@ -95,37 +58,48 @@ def generate_recipe(user_id):
 @app.route("/users", methods=["GET"])
 def get_users():
     conn = get_db_connection()
-    users = conn.execute("SELECT * FROM users").fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users")
+    users = cur.fetchall()
+    column_names = [desc[0] for desc in cur.description]
+    cur.close()
     conn.close()
-    return jsonify([dict(user) for user in users])
+    return jsonify([dict(zip(column_names, row)) for row in users])
 
-#Einzelnen User abrufen
+# Einzelnen User abrufen
 @app.route("/users/<int:user_id>", methods=["GET"])
 def get_user(user_id):
     conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    row = cur.fetchone()
+    column_names = [desc[0] for desc in cur.description]
+    cur.close()
     conn.close()
-    if user is None:
+    if row is None:
         return jsonify({"error": "User not found"}), 404
-    return jsonify(dict(user))
+    return jsonify(dict(zip(column_names, row)))
 
 # Neuen User registrieren
 @app.route("/register", methods=["POST"])
 def register_user():
     data = request.json
     username = data.get("name")
-    
+
     if not username:
         return jsonify({"error": "Username required"}), 400
 
     conn = get_db_connection()
+    cur = conn.cursor()
     try:
-        conn.execute("INSERT INTO users (name) VALUES (?)", (username,))
+        cur.execute("INSERT INTO users (name) VALUES (%s)", (username,))
         conn.commit()
-        user_id = conn.execute("SELECT id FROM users WHERE name = ?", (username,)).fetchone()[0]
-    except sqlite3.IntegrityError:
+        cur.execute("SELECT id FROM users WHERE name = %s", (username,))
+        user_id = cur.fetchone()[0]
+    except IntegrityError:
         return jsonify({"error": "Username already exists"}), 409
     finally:
+        cur.close()
         conn.close()
 
     return jsonify({"id": user_id, "name": username})
@@ -134,45 +108,50 @@ def register_user():
 @app.route("/recipes/<int:user_id>", methods=["GET"])
 def get_recipes(user_id):
     conn = get_db_connection()
-    recipes = conn.execute("SELECT * FROM recipes WHERE user_id = ?", (user_id,)).fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM recipes WHERE user_id = %s", (user_id,))
+    rows = cur.fetchall()
+    column_names = [desc[0] for desc in cur.description]
+    cur.close()
     conn.close()
 
-    # Umwandeln jedes Rezept von sqlite3.Row in ein Dictionary
     recipes_list = []
-    for recipe in recipes:
-        recipe_dict = dict(recipe)  # Konvertiert das sqlite3.Row in ein Dictionary
-        # Umwandeln des gespeicherten JSON-Strings zurück in ein Dictionary für ingredients
+    for row in rows:
+        recipe_dict = dict(zip(column_names, row))
         recipe_dict["ingredients"] = json.loads(recipe_dict["ingredients"])
         recipes_list.append(recipe_dict)
 
     return jsonify(recipes_list)
 
-#Einzelnes Rezept eines Users abrufen
+# Einzelnes Rezept eines Users abrufen
 @app.route("/recipes/<int:user_id>/<int:recipe_id>", methods=["GET"])
 def get_recipe(user_id, recipe_id):
     conn = get_db_connection()
-    recipe = conn.execute("SELECT * FROM recipes WHERE id = ? AND user_id = ?", (recipe_id, user_id)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM recipes WHERE id = %s AND user_id = %s", (recipe_id, user_id))
+    row = cur.fetchone()
+    column_names = [desc[0] for desc in cur.description]
+    cur.close()
     conn.close()
 
-    if recipe is None:
+    if row is None:
         return jsonify({"error": "Recipe not found"}), 404
 
-    # Wandelt die Row in ein Dictionary um
-    recipe_dict = dict(recipe)
+    recipe_dict = dict(zip(column_names, row))
 
-    # ⚠️ ingredients als JSON-Dict laden!
     if isinstance(recipe_dict.get("ingredients"), str):
         recipe_dict["ingredients"] = json.loads(recipe_dict["ingredients"])
 
     return jsonify(recipe_dict)
 
-#Rezepte gefiltert nach Zutaten abrufen
+# Rezepte gefiltert nach Zutaten abrufen
 @app.route("/filters/<int:user_id>", methods=["GET"])
 def get_filter_options(user_id):
     conn = get_db_connection()
-    recipes = conn.execute(
-        "SELECT ingredients FROM recipes WHERE user_id = ?", (user_id,)
-    ).fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT ingredients FROM recipes WHERE user_id = %s", (user_id,))
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
     categories = {
@@ -182,14 +161,13 @@ def get_filter_options(user_id):
         "fats": set()
     }
 
-    for row in recipes:
-        ingredients = json.loads(row["ingredients"])
+    for row in rows:
+        ingredients = json.loads(row[0])
         for cat in categories:
             value = ingredients.get(cat)
             if value:
                 categories[cat].add(value)
 
-    #Alphabetisch sortieren
     result = {k: sorted(list(v)) for k, v in categories.items()}
     return jsonify(result)
 
@@ -208,15 +186,17 @@ def save_recipe():
     ingredients_json = json.dumps(ingredients)
 
     conn = get_db_connection()
-    cursor = conn.execute(
-        "INSERT INTO recipes (user_id, title, ingredients, instructions) VALUES (?, ?, ?, ?)",
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO recipes (user_id, title, ingredients, instructions) VALUES (%s, %s, %s, %s)",
         (user_id, title, ingredients_json, instructions)
     )
     conn.commit()
-    recipe_id = cursor.lastrowid
+    cur.execute("SELECT LASTVAL()")
+    recipe_id = cur.fetchone()[0]
+    cur.close()
     conn.close()
 
-    # Sende das neue Rezept zurück, damit das Frontend die ID kennt
     return jsonify({
         "id": recipe_id,
         "user_id": user_id,
@@ -229,8 +209,10 @@ def save_recipe():
 @app.route("/delete/<int:recipe_id>", methods=["DELETE"])
 def delete_recipe(recipe_id):
     conn = get_db_connection()
-    conn.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM recipes WHERE id = %s", (recipe_id,))
     conn.commit()
+    cur.close()
     conn.close()
     return jsonify({"message": "Recipe deleted!"})
 
