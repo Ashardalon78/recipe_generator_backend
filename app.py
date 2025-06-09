@@ -1,34 +1,34 @@
-import psycopg2
-from psycopg2 import IntegrityError
-import json
 import os
+import json
 import random
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+# Lade Umgebungsvariablen
+load_dotenv()  # Optional: dotenv_path="config/.env"
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
+
+HEADERS = {
+    "apikey": SUPABASE_API_KEY,
+    "Authorization": f"Bearer {SUPABASE_API_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+}
 
 app = Flask(__name__)
-CORS(app)  # Erlaubt Anfragen von deinem Vue-Frontend
+CORS(app)
 
-# Zutatenliste für zufällige Rezepte
-with open('ingredients.json', 'r') as ifile:
-    ingredients = json.load(ifile)
+with open("ingredients.json", "r") as f:
+    ingredients = json.load(f)
 
-# Funktion zum Abrufen der DB-Verbindung
-def get_db_connection():
-    return psycopg2.connect(
-        host="db.fahadbyewpapvgjpghmh.supabase.co",
-        dbname="postgres",
-        user="postgres",
-        password="lZIzIXcPVCPTiZDH",
-        port=5432
-    )
-
-# Alle Zutaten abholen
 @app.route("/ingredients", methods=["GET"])
 def get_ingredients():
     return jsonify(ingredients)
 
-# Endpoint: Zufälliges Rezept generieren
 @app.route("/generate/<int:user_id>", methods=["GET"])
 def generate_recipe(user_id):
     recipe = {
@@ -37,184 +37,125 @@ def generate_recipe(user_id):
             "vegetables": random.choice(ingredients["vegetables"]),
             "proteins": random.choice(ingredients["proteins"]),
             "carbs": random.choice(ingredients["carbs"]),
-            "fats": random.choice(ingredients["fats"])
+            "fats": random.choice(ingredients["fats"]),
         },
         "instructions": "Zubereitung..."
     }
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    if user is None:
+    user_res = requests.get(f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}", headers=HEADERS)
+    if not user_res.ok or not user_res.json():
         return jsonify({"error": "User not found"}), 404
 
     return jsonify(recipe)
 
-# Alle User abrufen
 @app.route("/users", methods=["GET"])
 def get_users():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users")
-    users = cur.fetchall()
-    column_names = [desc[0] for desc in cur.description]
-    cur.close()
-    conn.close()
-    return jsonify([dict(zip(column_names, row)) for row in users])
+    res = requests.get(f"{SUPABASE_URL}/rest/v1/users", headers=HEADERS)
+    return jsonify(res.json())
 
-# Einzelnen User abrufen
 @app.route("/users/<int:user_id>", methods=["GET"])
 def get_user(user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-    row = cur.fetchone()
-    column_names = [desc[0] for desc in cur.description]
-    cur.close()
-    conn.close()
-    if row is None:
+    res = requests.get(f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}", headers=HEADERS)
+    data = res.json()
+    if not data:
         return jsonify({"error": "User not found"}), 404
-    return jsonify(dict(zip(column_names, row)))
+    return jsonify(data[0])
 
-# Neuen User registrieren
 @app.route("/register", methods=["POST"])
 def register_user():
-    data = request.json
-    username = data.get("name")
-
+    username = request.json.get("name")
     if not username:
         return jsonify({"error": "Username required"}), 400
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("INSERT INTO users (name) VALUES (%s)", (username,))
-        conn.commit()
-        cur.execute("SELECT id FROM users WHERE name = %s", (username,))
-        user_id = cur.fetchone()[0]
-    except IntegrityError:
+    data = {"name": username}
+    res = requests.post(f"{SUPABASE_URL}/rest/v1/users", headers=HEADERS, data=json.dumps(data))
+
+    if res.status_code == 409:
         return jsonify({"error": "Username already exists"}), 409
-    finally:
-        cur.close()
-        conn.close()
+    elif not res.ok:
+        return jsonify({"error": "Registration failed"}), 500
 
-    return jsonify({"id": user_id, "name": username})
+    # User erneut abfragen
+    lookup = requests.get(f"{SUPABASE_URL}/rest/v1/users?name=eq.{username}", headers=HEADERS)
+    return jsonify(lookup.json()[0])
 
-# Alle Rezepte eines Users abrufen
 @app.route("/recipes/<int:user_id>", methods=["GET"])
 def get_recipes(user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM recipes WHERE user_id = %s", (user_id,))
-    rows = cur.fetchall()
-    column_names = [desc[0] for desc in cur.description]
-    cur.close()
-    conn.close()
+    res = requests.get(f"{SUPABASE_URL}/rest/v1/recipes?user_id=eq.{user_id}", headers=HEADERS)
+    recipes = res.json()
+    for r in recipes:
+        if isinstance(r["ingredients"], str):
+            r["ingredients"] = json.loads(r["ingredients"])
+    return jsonify(recipes)
 
-    recipes_list = []
-    for row in rows:
-        recipe_dict = dict(zip(column_names, row))
-        recipe_dict["ingredients"] = json.loads(recipe_dict["ingredients"])
-        recipes_list.append(recipe_dict)
-
-    return jsonify(recipes_list)
-
-# Einzelnes Rezept eines Users abrufen
 @app.route("/recipes/<int:user_id>/<int:recipe_id>", methods=["GET"])
 def get_recipe(user_id, recipe_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM recipes WHERE id = %s AND user_id = %s", (recipe_id, user_id))
-    row = cur.fetchone()
-    column_names = [desc[0] for desc in cur.description]
-    cur.close()
-    conn.close()
-
-    if row is None:
+    url = f"{SUPABASE_URL}/rest/v1/recipes?user_id=eq.{user_id}&id=eq.{recipe_id}"
+    res = requests.get(url, headers=HEADERS)
+    data = res.json()
+    if not data:
         return jsonify({"error": "Recipe not found"}), 404
+    recipe = data[0]
+    if isinstance(recipe["ingredients"], str):
+        recipe["ingredients"] = json.loads(recipe["ingredients"])
+    return jsonify(recipe)
 
-    recipe_dict = dict(zip(column_names, row))
-
-    if isinstance(recipe_dict.get("ingredients"), str):
-        recipe_dict["ingredients"] = json.loads(recipe_dict["ingredients"])
-
-    return jsonify(recipe_dict)
-
-# Rezepte gefiltert nach Zutaten abrufen
 @app.route("/filters/<int:user_id>", methods=["GET"])
 def get_filter_options(user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT ingredients FROM recipes WHERE user_id = %s", (user_id,))
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    url = f"{SUPABASE_URL}/rest/v1/recipes?user_id=eq.{user_id}&select=ingredients"
+    res = requests.get(url, headers=HEADERS)
+    rows = res.json()
 
-    categories = {
-        "vegetables": set(),
-        "proteins": set(),
-        "carbs": set(),
-        "fats": set()
-    }
-
+    categories = {"vegetables": set(), "proteins": set(), "carbs": set(), "fats": set()}
     for row in rows:
-        ingredients = json.loads(row[0])
+        ingr = json.loads(row["ingredients"])
         for cat in categories:
-            value = ingredients.get(cat)
-            if value:
-                categories[cat].add(value)
+            if cat in ingr:
+                categories[cat].add(ingr[cat])
 
     result = {k: sorted(list(v)) for k, v in categories.items()}
     return jsonify(result)
 
-# Rezept speichern
 @app.route("/save", methods=["POST"])
 def save_recipe():
-    data = request.json
-    user_id = data.get("user_id")
-    title = data.get("title")
-    ingredients = data.get("ingredients")
-    instructions = data.get("instructions")
+    try:
+        data = request.get_json()
+        print("RECIPE TO SAVE:", data)
 
-    if not user_id or not title or not ingredients or not instructions:
-        return jsonify({"error": "Missing data"}), 400
+        response = requests.post(
+            f"{SUPABASE_URL}/rest/v1/recipes",
+            headers=HEADERS,
+            data=json.dumps(data),
+        )
 
-    ingredients_json = json.dumps(ingredients)
+        print("Supabase response code:", response.status_code)
+        print("Supabase response text:", response.text)
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO recipes (user_id, title, ingredients, instructions) VALUES (%s, %s, %s, %s)",
-        (user_id, title, ingredients_json, instructions)
-    )
-    conn.commit()
-    cur.execute("SELECT LASTVAL()")
-    recipe_id = cur.fetchone()[0]
-    cur.close()
-    conn.close()
+        if not response.ok:
+            return jsonify({"error": "Saving failed", "details": response.text}), 500
 
-    return jsonify({
-        "id": recipe_id,
-        "user_id": user_id,
-        "title": title,
-        "ingredients": ingredients,
-        "instructions": instructions
-    })
+        # Jetzt: Antwort abfragen und zurückgeben
+        # Supabase sollte JSON liefern
+        try:
+            response_data = response.json()
+        except Exception as e:
+            print("JSON parse error:", e)
+            return jsonify({"error": "Invalid JSON from Supabase", "raw": response.text}), 500
 
-# Rezept löschen
+        return jsonify(response_data[0])
+
+    except Exception as e:
+        print("SAVE ERROR:", e)
+        return jsonify({"error": "Internal error", "details": str(e)}), 500
+
 @app.route("/delete/<int:recipe_id>", methods=["DELETE"])
 def delete_recipe(recipe_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM recipes WHERE id = %s", (recipe_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return jsonify({"message": "Recipe deleted!"})
+    url = f"{SUPABASE_URL}/rest/v1/recipes?id=eq.{recipe_id}"
+    res = requests.delete(url, headers=HEADERS)
+    print(res.status_code)
+    if res.status_code in (200, 204):
+        return jsonify({"message": "Recipe deleted!"})
+    return jsonify({"error": "Delete failed"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)
