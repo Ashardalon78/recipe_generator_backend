@@ -75,7 +75,7 @@ def register_user():
     if not username:
         return jsonify({"error": "Username required"}), 400
 
-    data = {"name": username}
+    data = {"name": username, "role": "user"}
     res = requests.post(f"{SUPABASE_URL}/rest/v1/users", headers=get_headers(), data=json.dumps(data))
 
     if res.status_code == 409:
@@ -85,6 +85,30 @@ def register_user():
 
     lookup = requests.get(f"{SUPABASE_URL}/rest/v1/users?name=eq.{username}", headers=get_headers())
     return jsonify(lookup.json()[0])
+
+@app.route("/admin/create_coach", methods=["POST"])
+def create_coach():
+    caller = request.json.get("caller")  # z. B. "Ralf_Admin"
+    coach_name = request.json.get("coach_name")
+
+    # Prüfen, ob caller wirklich Admin ist
+    res = requests.get(f"{SUPABASE_URL}/rest/v1/users?name=eq.{caller}", headers=get_headers())
+    if not res.ok or not res.json():
+        return jsonify({"error": "Caller not found"}), 404
+
+    caller_data = res.json()[0]
+    if caller_data["role"] != "admin":
+        return jsonify({"error": "Not authorized"}), 403
+
+    # Coach anlegen
+    coach_data = {"name": coach_name, "role": "coach"}
+    insert = requests.post(f"{SUPABASE_URL}/rest/v1/users", headers=get_headers(), data=json.dumps(coach_data))
+
+    if insert.status_code == 409:
+        return jsonify({"error": "Coach name already exists"}), 409
+
+    return jsonify(insert.json())
+
 
 @app.route("/recipes/<int:user_id>", methods=["GET"])
 def get_recipes(user_id):
