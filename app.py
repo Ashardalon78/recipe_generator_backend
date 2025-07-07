@@ -97,11 +97,11 @@ def create_coach():
         return jsonify({"error": "Caller not found"}), 404
 
     caller_data = res.json()[0]
-    if caller_data["role"] != "admin":
+    if caller_data["level"] != "admin":
         return jsonify({"error": "Not authorized"}), 403
 
     # Coach anlegen
-    coach_data = {"name": coach_name, "role": "coach"}
+    coach_data = {"name": coach_name, "level": "coach"}
     insert = requests.post(f"{SUPABASE_URL}/rest/v1/users", headers=get_headers(), data=json.dumps(coach_data))
 
     if insert.status_code == 409:
